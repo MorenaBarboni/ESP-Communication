@@ -5,8 +5,9 @@
 static SoftwareSerial MySerial(TX, RX);
 
 static byte MY_ID;               //ID of this ANT
-static byte _bufsize;      
-static char _buffer[BUFFER_DIM]; //Ant reception buffer
+static byte _bufsize;            
+static char _buffer[BUFFER_DIM]; // //Ant reception buffer
+
 static bool ANT_LIST[MAX_ANTS]; //List of ants in the network
 
 static byte succ;            //pointer to next ANT
@@ -21,7 +22,7 @@ static bool specialTurn; //special turn flag
 /*Semaphore*/
 SemaphoreHandle_t xMutex = NULL;
 
-//Task handles
+/*Task Handles*/
 TaskHandle_t *taskBuffer;
 TaskHandle_t *taskComm;
 TaskHandle_t *taskRGB;
@@ -38,19 +39,22 @@ static byte recvPos4[NUM_NEXT_POS] = {225, 225, 225, 225, 225, 225, 225, 225}; /
 static byte recvPos5[NUM_NEXT_POS] = {225, 225, 225, 225, 225, 225, 225, 225}; // received next pos from outside ant 5
 
 
+
 static bool initPhase; //set to true only during initial join phase
 static bool suspendTimer; //set to true if timer not needed while reading buffer
-static bool isMyTurn; //set to true if it's my turn to send the message
+static bool isMyTurn; //Says if it's my turn to send the message
 
 static byte startAndStop;      // 0 = stop, 1 = start
 static byte myCurrentPosition; // my current pos to brodcast
-static byte antMode;           //Command to select ant mode
+static byte antMode;           //Command to select ant mode; 0 = default random mode
 
 static byte currPos1 = 225; // received current pos from outside ant 1
 static byte currPos2 = 225; // received current pos from outside ant 2
 static byte currPos3 = 225; // received current pos from outside ant 3
 static byte currPos4 = 225; // received current pos from outside ant 4
 static byte currPos5 = 225; // received current pos from outside ant 5
+
+unsigned long timestamp;
 
 void RACom::init(byte id)
 {
@@ -80,13 +84,14 @@ void RACom::init(byte id)
 	initPhase = true;
 	suspendTimer = false;
 	specialTurn = false;
+	timestamp = 0;
 	xSemaphoreTake(xMutex, 0);
  	Join(); 
 }
 
 void RACom::comAlgo()
 {  
-//Only ant in the network
+//Only ant
 	if(succ == 100 && prev == 100)
 	{ 
 		Send();
@@ -109,6 +114,7 @@ void RACom::comAlgo()
 	}
 }
 
+
 //Ant joins the network
 //It waits until Join_timeout to listen for other ants.
 void RACom::Join()
@@ -121,16 +127,15 @@ void RACom::Join()
  	while( xSemaphoreTake( xMutex, ( TickType_t ) 10 ) == pdFALSE );
 	initPhase = false;
 	suspendTimer = true;
-
 	//If a message is received, it builds its table and sends hello to join the network
-	if(_buffer[0] != '\0') //if buffer is not empty i received a message
+	if(_buffer[0] != '\0')
 	{
 		bool isSpecialTurn = false;
 		Serial.print("\nWaiting for first special turn");
 		while (!isSpecialTurn)
 		{
 			xSemaphoreGive( xMutex); 
-	 		vTaskDelay(1);
+	 		vTaskDelay(2);
 	 		while( xSemaphoreTake( xMutex, ( TickType_t ) 10 ) == pdFALSE );				
 			
 				int mit;  
@@ -177,11 +182,11 @@ void RACom::Join()
 		//Establish who is the first ant to speak after join
 		if (prev == 100) 
 		{
-			vTaskDelay(30);
+			vTaskDelay(REPLY_TIMEOUT /3); //Delay for first ant in the cycle
 			isMyTurn = true;
 		}
 	}
-	suspendTimer = false; //start timer during readbuffer
+	suspendTimer = false; //start timer during read
 }
 
 //Build ant table
@@ -190,48 +195,48 @@ void RACom::BuildTable(){
 	Serial.print("\nBuilding table for:");
 	while (building){	
 	xSemaphoreGive( xMutex); 
-	vTaskDelay(1);
+	vTaskDelay(2);
 	while( xSemaphoreTake( xMutex, ( TickType_t ) 10 ) == pdFALSE );
 	
-		int mit;  
-		int dest;
+				int mit;  
+				int dest;
 
-		size_t bufsize = sizeof(_buffer);
-		char copy[bufsize];
-		strncpy(copy, _buffer, bufsize);
-		copy[bufsize-1] = '\0';
-		char * pch = strtok(copy, "#");
-		int i = 0;
-		while (pch != NULL) 
-		{
-			if (i == 0)
-			{ 
-				mit = atoi(pch); 
-			}
-			if(i == 1) 
-			{ 
-				dest = atoi(pch); 
-			}
+				size_t bufsize = sizeof(_buffer);
+				char copy[bufsize];
+				strncpy(copy, _buffer, bufsize);
+				copy[bufsize-1] = '\0';
+				char * pch = strtok(copy, "#");
+				int i = 0;
+				while (pch != NULL) 
+				{
+					if (i == 0)
+					{ 
+						mit = atoi(pch); 
+					}
+					if(i == 1) 
+					{ 
+						dest = atoi(pch); 
+					}
 
-			if(i > 1) 
-			{
-				pch = NULL;
-			} 
-			else 
-			{
-				pch = strtok(NULL, "#");
-			}
-			i++;
-		}
-		_buffer[0] = '\0';
-		memset(_buffer, 0, _bufsize);
+					if(i > 1) 
+					{
+						pch = NULL;
+					} 
+					else 
+					{
+						pch = strtok(NULL, "#");
+					}
+					i++;
+				}
+				_buffer[0] = '\0';
+				memset(_buffer, 0, _bufsize);
 
-		//Add mit to table
-		ANT_LIST[mit] = true;
-		if (dest == 100)
-		{
-			building = false; //Stop building table
-		}	
+				//Add mit to table
+				ANT_LIST[mit] = true;
+				if (dest == 100)
+				{
+					building = false; //Stop building table
+				}	
 		    
 	}
 }
@@ -242,6 +247,7 @@ void RACom::UpdatePrevSucc(){
 	//Update prev and succ
 	int newSucc = 0;
 	int newPrev = 0;
+
 	//UPDATE SUCC
 	for (int i = MY_ID + 1; i < MAX_ANTS; i++)
 	{
@@ -271,9 +277,9 @@ void RACom::UpdatePrevSucc(){
 	prev = newPrev;
 	succ = newSucc;
 	Serial.println("\nNew PREV: ");
-	Serial.println(prev);
+	Serial.print(prev);
 	Serial.println("\nNew SUCC: ");
-	Serial.println(succ);
+	Serial.print(succ);
 }
 
 
@@ -283,8 +289,8 @@ void RACom::Hello()
 	Serial.print(F("\nHello message sent: "));
 	// Wireless send
 	MySerial.print('H');  // start char hello
-	Serial.print('H');    
-	MySerial.print(MY_ID); // ant ID
+	Serial.print('H');    // start char hello
+	MySerial.print(MY_ID); // dest
 	Serial.print(MY_ID);
 	MySerial.print('$'); // end char
 }
@@ -295,17 +301,14 @@ void RACom::ReceiveHello()
 	_buffer[0] = '\0';
 	memset(_buffer, 0, _bufsize);
 	xSemaphoreGive(xMutex);
-	vTaskDelay(1);
+	vTaskDelay(2);
 	while( xSemaphoreTake( xMutex, ( TickType_t ) 10 ) == pdFALSE );
 	int id = 0;
 	size_t bufsize = sizeof(_buffer);
-
-	//If  hello message is received, the state is updated
 	if (_buffer[0] != '\0'){
 		if(_buffer[0] == '@')
 		return;
 		char copy[bufsize];
-			Serial.print(_buffer[0]);
 		strncpy(copy, _buffer, bufsize);
 		copy[bufsize - 1] = '\0';
 		id = atoi(copy);
@@ -314,14 +317,17 @@ void RACom::ReceiveHello()
 	}			
 }
 
-  //Message broadcast
+  //Broadcast message addressed to my succ
 void RACom::Send(){
 	MySerial.flush();
 	Serial.flush();
-	vTaskDelay(30);
+	vTaskDelay(50);
 
-	Serial.print(F("\n<--- Message Sent: "));
+	timestamp = millis() / 1000; //timestamp in seconds
 
+	Serial.print(F("\n<-- Message Sent: "));
+
+	// Wireless send
 	MySerial.print('@'); // start char
 
 	MySerial.print(MY_ID); // mit
@@ -361,6 +367,12 @@ void RACom::Send(){
 	MySerial.print(myCurrentPosition); // current position
 	Serial.print(myCurrentPosition);
 
+	MySerial.print('#'); // separator
+	Serial.print('#');
+
+	MySerial.print(timestamp); // current position
+	Serial.print(timestamp);
+
 	MySerial.print('$'); // end char
 
     //Update expected
@@ -373,7 +385,6 @@ void RACom::Send(){
 	isMyTurn = false;
  }
 
-//taskBuffer
 void RACom::readBuffer(){
   	if ( xSemaphoreTake( xMutex, ( TickType_t ) 10 ) == pdTRUE ){
 
@@ -383,6 +394,7 @@ void RACom::readBuffer(){
 				char firstChar = (char)MySerial.read();
 				if (firstChar == '@' )
 				{
+					Serial.print("\n<-- Message Received: ");
 					MySerial.readBytesUntil('$', _buffer, _bufsize);
 					Serial.println(_buffer);		
 				}			
@@ -396,6 +408,7 @@ void RACom::readBuffer(){
 					char firstChar = (char)MySerial.read();
 					if (firstChar == 'H' || firstChar == '@' )
 					{
+						Serial.print("\n<-- Message Received: ");
 						MySerial.readBytesUntil('$', _buffer, _bufsize);
 						Serial.println(_buffer);  
 						comTimerCallback(xComTimer);
@@ -406,11 +419,11 @@ void RACom::readBuffer(){
 		Serial.flush();
 		MySerial.flush();					
 		xSemaphoreGive( xMutex );
-		vTaskDelay(1);
+		vTaskDelay(2);
 	}
 }
 
-  //Receive message
+  //Receive data
  void RACom::Receive(){
 	//Flush buffer
 	_buffer[0] = '\0';
@@ -423,14 +436,13 @@ void RACom::readBuffer(){
 	int ss;  
 	
  	xSemaphoreGive( xMutex); 
-	 vTaskDelay(1);
+	 vTaskDelay(2);
 	 while( xSemaphoreTake( xMutex, ( TickType_t ) 10 ) == pdFALSE );
 		//If I don't read all the separators, the ant died while sending the message
 	int separator = count_underscores(_buffer);
-	if( separator == 12 )
+	if( separator == 13 )
 		{
 			alive = true;
-			//Serial.print(_buffer);  
 			size_t bufsize = sizeof(_buffer);
 			char copy[bufsize];
 			strncpy(copy, _buffer, bufsize);
@@ -502,9 +514,8 @@ void RACom::readBuffer(){
 		{
 			Death(expected);
 		}
-		else //If a message is received 
+		else //If a message is received
 		{
-			//If the message is for me, set isMyTurn to true
 			if(dest == MY_ID)
 			{
 				isMyTurn = true;
@@ -528,7 +539,7 @@ int RACom::count_underscores(char *s) {
   return count;
 }
 
- //Updates variables to remove dead ant
+//Updates variables to remove dead ant
 void RACom::Death(int mit){
  for (int i = mit; i < MAX_ANTS; i++)
 	{
@@ -567,7 +578,7 @@ void RACom::Special_Turn(){
 	specialTurn = false;
 }
 
-//Return ID of first ant in the table
+//Returns ID of first ant in the table
  int RACom::getFirstAnt(){
    	for(int i = 1; i <= MAX_ANTS; i++){
 	   if(ANT_LIST[i]){
@@ -576,13 +587,13 @@ void RACom::Special_Turn(){
 	}
  }
 
-//This method is used for set the 13s pin as HIGH (5V)
+
 void RACom::comunicationMode()
 {
 	digitalWrite(SET_PIN, HIGH);
 	//analogWrite(SET_PIN, 255);
 }
-//this method is used for set the 13s pin as LOW (0V)
+
 void RACom::commandMode()
 {
 	digitalWrite(SET_PIN, LOW);
@@ -652,7 +663,7 @@ byte RACom::getCurrentPosOfAnt(byte num_ant)
 
 void RACom::setupMutex()
 {
-	Serial.println("Setup mutex");
+	//Serial.println("Setup mutex");
 	xMutex = xSemaphoreCreateMutex();
 	if (xMutex == NULL)
 		{
@@ -664,7 +675,7 @@ void RACom::setupMutex()
 
 void RACom::setupTimers()
 {
-	Serial.println("Setup timer");
+	//Serial.println("Setup timer");
 
 	xComTimer = xTimerCreate(
 		"Comunication_Timer",     /* A text name, purely to help debugging. */
@@ -682,7 +693,6 @@ void RACom::setupTimers()
 	}
 }
 
-  //Starts the timer for adding a new ant to the network
 void RACom::startTimer()
 {
 	if(initPhase){

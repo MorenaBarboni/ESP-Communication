@@ -20,12 +20,11 @@ enum
     TX = 6,
     SET_PIN = 13,
     JOIN_TIMEOUT = 5000 / portTICK_PERIOD_MS, // 5 seconds
-    REPLY_TIMEOUT = 3000 / portTICK_PERIOD_MS,
+    REPLY_TIMEOUT = 2000 / portTICK_PERIOD_MS,
     NUM_NEXT_POS = 8,
     SPECIAL_ANT_ID = 3,
     BUFFER_DIM = 120,
 	MAX_ANTS = 16, // Max number of ants in the antNet
-	TASK_DELAY = 200 / portTICK_PERIOD_MS  //delay applied to a task
 };
 //Define RACom class with relatives methods
 class RACom {
